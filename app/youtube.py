@@ -49,6 +49,7 @@ class Transcript:
     language_code: str
     is_generated: bool
     snippets: list[Snippet]
+    title: str | None = None
 
 
 def extract_video_id(url: str) -> str:
@@ -155,6 +156,28 @@ def _to_snippets(fetched) -> list[Snippet]:
     return out
 
 
+def fetch_title(video_id: str) -> str | None:
+    """Busca o titulo do video pelo oEmbed publico do YouTube.
+
+    Serve so para nomear o arquivo de saida, entao qualquer falha aqui e
+    ignorada: sem titulo, o arquivo fica com o ID do video.
+    """
+    try:
+        import httpx
+
+        response = httpx.get(
+            "https://www.youtube.com/oembed",
+            params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
+            timeout=10.0,
+        )
+        if response.status_code == 200:
+            title = response.json().get("title")
+            return title.strip() if isinstance(title, str) and title.strip() else None
+    except Exception:
+        pass
+    return None
+
+
 def fetch_transcript(url: str) -> Transcript:
     """Busca a legenda do video no idioma original em que ele foi falado."""
     video_id = extract_video_id(url)
@@ -171,11 +194,14 @@ def fetch_transcript(url: str) -> Transcript:
     except AgeRestricted as exc:
         raise TranscriptError("Video com restricao de idade: o YouTube exige login.") from exc
     except RequestBlocked as exc:
-        # Acontece depois de muitas requisicoes seguidas, ou em IP de nuvem.
-        # E temporario: o bloqueio costuma cair sozinho em minutos ou horas.
+        # O YouTube limita por IP o endpoint que serve o TEXTO da legenda. O
+        # resto do site continua respondendo normalmente, entao nao adianta
+        # testar abrindo o video no navegador: parece tudo certo.
         raise TranscriptError(
-            "O YouTube bloqueou as requisicoes deste IP (excesso de acessos ou IP de "
-            "datacenter). Espere alguns minutos ou configure YT_PROXY_HTTP no .env."
+            "O YouTube esta limitando as requisicoes de legenda deste IP (HTTP 429). "
+            "Nao e a chave nem o video. Opcoes: esperar algumas horas, usar outra rede "
+            "(dados moveis, por exemplo), ou configurar YT_PROXY_HTTP no .env. "
+            "Rode 'python -m app.diagnostico URL' para confirmar."
         ) from exc
     except CouldNotRetrieveTranscript as exc:
         raise TranscriptError(f"Nao foi possivel obter a legenda: {exc}") from exc
@@ -189,4 +215,5 @@ def fetch_transcript(url: str) -> Transcript:
         language_code=getattr(chosen, "language_code", ""),
         is_generated=bool(getattr(chosen, "is_generated", False)),
         snippets=snippets,
+        title=fetch_title(video_id),
     )

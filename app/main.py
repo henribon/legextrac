@@ -1,16 +1,17 @@
-"""API: recebe um link do YouTube, extrai a legenda e traduz com o DeepL."""
+"""API: recebe um link do YouTube, extrai a legenda original e traduz."""
+
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
-from . import config, translators
-from .formats import merge_into_sentences, to_srt
+from . import config, pipeline, translators
+from .formats import to_srt
 from .models import Segment, TranscriptRequest, TranscriptResponse
-from .youtube import TranscriptError, fetch_transcript
 
 app = FastAPI(
     title="legextrac",
-    description="Extrai legendas de videos do YouTube e traduz para portugues via DeepL.",
+    description="Extrai a legenda original de videos do YouTube e traduz para portugues.",
     version="1.0.0",
 )
 
@@ -27,65 +28,58 @@ def health() -> dict:
 
 def _process(req: TranscriptRequest):
     try:
-        transcript = fetch_transcript(req.url)
-    except TranscriptError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        r = pipeline.processar(
+            url=req.url,
+            target_lang=req.target_lang,
+            translate=req.translate,
+            merge_sentences=req.merge_sentences,
+            save=req.save,
+        )
+    except pipeline.PipelineError as exc:
+        # 422 para problema com o video/legenda, 502 quando o tradutor falhou.
+        codigo = 502 if "Gemini" in str(exc) or "DeepL" in str(exc) else 422
+        raise HTTPException(status_code=codigo, detail=str(exc)) from exc
 
-    snippets = (
-        merge_into_sentences(transcript.snippets)
-        if req.merge_sentences
-        else transcript.snippets
-    )
-    originals = [s.text for s in snippets]
+    saved_to = str(r.saved_to) if r.saved_to else None
 
-    translations: list[str] | None = None
-    note: str | None = None
-    target = None
-    if req.translate:
-        target = (req.target_lang or config.DEFAULT_TARGET_LANG).upper()
-        source = transcript.language_code.split("-")[0].lower()
-        if source == target.split("-")[0].lower():
-            # Video ja falado no idioma de destino: traduzir gastaria cota a toa.
-            note = f"Legenda original ja esta em {transcript.language}; DeepL nao foi chamado."
-        else:
-            try:
-                translations = translators.translate(
-                    originals,
-                    target_lang=target,
-                    source_lang=transcript.language_code,
-                )
-            except translators.TranslationError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    final_texts = translations if translations is not None else originals
+    # Cabecalho HTTP so aceita latin-1, e o caminho pode ter acento vindo do
+    # titulo do video. Vai percent-encoded; o corpo JSON leva o caminho cru.
+    headers = {"X-Saved-To": quote(saved_to)} if saved_to else None
 
     if req.format == "srt":
         return PlainTextResponse(
-            to_srt(snippets, final_texts),
+            to_srt(r.snippets, r.textos),
             media_type="application/x-subrip; charset=utf-8",
+            headers=headers,
         )
     if req.format == "text":
-        return PlainTextResponse(" ".join(final_texts), media_type="text/plain; charset=utf-8")
+        return PlainTextResponse(
+            " ".join(r.textos),
+            media_type="text/plain; charset=utf-8",
+            headers=headers,
+        )
 
     return TranscriptResponse(
-        video_id=transcript.video_id,
-        source_language=transcript.language,
-        source_language_code=transcript.language_code,
-        is_generated=transcript.is_generated,
-        target_lang=target,
-        translated=translations is not None,
-        note=note,
-        segment_count=len(snippets),
-        text=" ".join(originals),
-        translated_text=" ".join(translations) if translations is not None else None,
+        video_id=r.video_id,
+        title=r.title,
+        saved_to=saved_to,
+        source_language=r.source_language,
+        source_language_code=r.source_language_code,
+        is_generated=r.is_generated,
+        target_lang=r.target_lang,
+        translated=r.translated,
+        note=r.note,
+        segment_count=len(r.snippets),
+        text=" ".join(r.originais),
+        translated_text=" ".join(r.traducoes) if r.traducoes is not None else None,
         segments=[
             Segment(
                 start=round(s.start, 3),
                 duration=round(s.duration, 3),
                 text=s.text,
-                translated_text=translations[i] if translations is not None else None,
+                translated_text=r.traducoes[i] if r.traducoes is not None else None,
             )
-            for i, s in enumerate(snippets)
+            for i, s in enumerate(r.snippets)
         ],
     )
 
@@ -101,6 +95,7 @@ def transcript_get(
     target_lang: str | None = Query(default=None),
     translate: bool = Query(default=True),
     merge_sentences: bool = Query(default=True),
+    save: bool = Query(default=True),
     format: str = Query(default="json", pattern="^(json|text|srt)$"),
 ):
     return _process(
@@ -108,6 +103,7 @@ def transcript_get(
             url=url,
             target_lang=target_lang,
             translate=translate,
+            save=save,
             merge_sentences=merge_sentences,
             format=format,  # type: ignore[arg-type]
         )

@@ -27,6 +27,10 @@ class TranscriptRequest(BaseModel):
             "Melhora muito a qualidade do DeepL; desligue para manter o corte original."
         ),
     )
+    save: bool = Field(
+        default=True,
+        description="Grava o resultado em .txt na pasta configurada em OUTPUT_DIR",
+    )
     format: Literal["json", "text", "srt"] = Field(
         default="json",
         description="json = segmentos + texto; text = texto corrido; srt = arquivo de legenda",
@@ -42,6 +46,8 @@ class Segment(BaseModel):
 
 class TranscriptResponse(BaseModel):
     video_id: str
+    title: str | None = None
+    saved_to: str | None = None
     source_language: str
     source_language_code: str
     is_generated: bool

@@ -106,21 +106,27 @@ def _target_name(target_lang: str) -> str:
     return _LANG_NAMES.get(target_lang.upper(), target_lang)
 
 
-def _call(client: httpx.Client, prompt: str) -> str:
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.0,
-            "responseMimeType": "application/json",
-            "responseSchema": _SCHEMA,
-            "maxOutputTokens": 16384,
-            # Traduzir nao precisa de raciocinio passo a passo; desligar o
-            # "thinking" corta latencia e consumo de tokens.
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
+def _body(prompt: str, thinking: bool) -> dict:
+    config_gen: dict = {
+        "temperature": 0.0,
+        "responseMimeType": "application/json",
+        "responseSchema": _SCHEMA,
+        "maxOutputTokens": 16384,
     }
+    if thinking and config.GEMINI_THINKING_LEVEL:
+        # Traduzir nao precisa de raciocinio longo; o nivel baixo corta
+        # latencia e consumo de tokens. O campo mudou de nome entre geracoes
+        # de modelo (thinkingBudget no 2.x, thinkingLevel no 3.x), por isso a
+        # chamada sabe se recuperar quando ele e recusado.
+        config_gen["thinkingConfig"] = {"thinkingLevel": config.GEMINI_THINKING_LEVEL}
+    return {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": config_gen}
+
+
+def _call(client: httpx.Client, prompt: str) -> str:
     url = _ENDPOINT.format(model=config.GEMINI_MODEL)
     headers = {"x-goog-api-key": config.GEMINI_API_KEY}
+    thinking = True
+    body = _body(prompt, thinking)
 
     last_error = ""
     for attempt in range(3):
@@ -152,6 +158,20 @@ def _call(client: httpx.Client, prompt: str) -> str:
 
         if response.status_code in (400, 403) and "API_KEY" in response.text.upper():
             raise TranslationError("Gemini recusou a chave de API (GEMINI_API_KEY invalida).")
+
+        if response.status_code == 400 and thinking:
+            # Geracoes diferentes de modelo aceitam campos de "thinking"
+            # diferentes. Se foi isso, uma tentativa sem o campo resolve.
+            thinking = False
+            body = _body(prompt, thinking)
+            continue
+
+        if response.status_code == 404:
+            raise TranslationError(
+                f"O modelo '{config.GEMINI_MODEL}' nao esta disponivel para esta chave. "
+                "Rode 'python -m app.models_disponiveis' para ver a lista e ajuste "
+                "GEMINI_MODEL no .env."
+            )
 
         raise TranslationError(
             f"Gemini respondeu {response.status_code}: {response.text[:300]}"

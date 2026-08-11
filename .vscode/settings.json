@@ -1,0 +1,13 @@
+{
+  // Interpretador do venv do projeto
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+
+  // Carrega as variaveis do .env automaticamente (nao contem segredo em si:
+  // e so o caminho do arquivo, que fica fora do controle de versao)
+  "python.envFile": "${workspaceFolder}/.env",
+
+  "files.exclude": {
+    "**/__pycache__": true
+  }
+}
