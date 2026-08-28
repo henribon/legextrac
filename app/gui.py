@@ -1,4 +1,4 @@
-"""Janelinha para transcrever e traduzir um video do YouTube.
+"""Janelinha para transcrever e traduzir o video de um link.
 
     pythonw.exe -m app.gui
 
@@ -45,7 +45,7 @@ class Janela:
         root.title(TITULO)
         root.configure(bg=FUNDO)
         root.resizable(False, False)
-        self._centralizar(460, 250)
+        self._centralizar(460, 300)
 
         icone = Path(__file__).resolve().parent.parent / "assets" / "legextrac.ico"
         if icone.exists():
@@ -59,7 +59,7 @@ class Janela:
 
         tk.Label(
             moldura,
-            text="Link do vídeo no YouTube",
+            text="Link do vídeo (YouTube, Instagram, TikTok…)",
             bg=FUNDO,
             fg=TEXTO_FRACO,
             font=("Segoe UI", 9),
@@ -129,7 +129,8 @@ class Janela:
             texto = self.root.clipboard_get().strip()
         except tk.TclError:
             return
-        if "youtube.com/" in texto or "youtu.be/" in texto:
+        # Qualquer link serve; quem decide se o site tem midia e o pipeline.
+        if texto.startswith(("http://", "https://")) and not texto.split()[1:]:
             self.entrada.insert(0, texto)
             self.entrada.select_range(0, "end")
 

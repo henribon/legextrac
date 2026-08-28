@@ -1,17 +1,20 @@
-"""API: recebe um link do YouTube, extrai a legenda original e traduz."""
+"""API: recebe o link de um video, extrai a fala no idioma original e traduz."""
 
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
-from . import config, pipeline, translators
+from . import config, media, pipeline, translators
 from .formats import to_srt
 from .models import Segment, TranscriptRequest, TranscriptResponse
 
 app = FastAPI(
     title="legextrac",
-    description="Extrai a legenda original de videos do YouTube e traduz para portugues.",
+    description=(
+        "Extrai a fala de videos do YouTube, Instagram, TikTok e centenas de outros "
+        "sites, e traduz para portugues."
+    ),
     version="1.0.0",
 )
 
@@ -23,6 +26,9 @@ def health() -> dict:
         "translator": config.TRANSLATOR,
         "translator_configured": translators.is_configured(),
         "model": config.GEMINI_MODEL if config.TRANSLATOR == "gemini" else None,
+        # Sem ffmpeg a transcricao por audio ainda funciona, mas so em video
+        # curto: o arquivo sobe com imagem junto e gasta muito mais token.
+        "ffmpeg": media.tem_ffmpeg(),
     }
 
 
@@ -63,6 +69,9 @@ def _process(req: TranscriptRequest):
         video_id=r.video_id,
         title=r.title,
         saved_to=saved_to,
+        source=r.source,
+        source_url=r.source_url,
+        method=r.method,
         source_language=r.source_language,
         source_language_code=r.source_language_code,
         is_generated=r.is_generated,
@@ -91,7 +100,7 @@ def transcript(req: TranscriptRequest):
 
 @app.get("/transcript", response_model=None, summary="Mesma coisa, via query string")
 def transcript_get(
-    url: str = Query(..., description="Link do video no YouTube"),
+    url: str = Query(..., description="Link do video (YouTube, Instagram, TikTok...)"),
     target_lang: str | None = Query(default=None),
     translate: bool = Query(default=True),
     merge_sentences: bool = Query(default=True),

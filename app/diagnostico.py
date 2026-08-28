@@ -13,7 +13,8 @@ import sys
 
 import httpx
 
-from .youtube import TranscriptError, extract_video_id
+from .transcript import TranscriptError
+from .youtube import extract_video_id
 
 _HEADERS = {"Accept-Language": "en-US,en"}
 

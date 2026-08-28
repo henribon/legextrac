@@ -1,16 +1,18 @@
 """O fluxo completo: buscar legenda -> agrupar -> traduzir -> gravar.
 
 Fica separado da API porque o aplicativo de desktop usa exatamente o mesmo
-caminho, sem HTTP no meio.
+caminho, sem HTTP no meio. De onde a legenda vem -- faixa publicada no YouTube
+ou audio ditado pelo Gemini -- e problema do `sources.py`; aqui o tratamento e
+igual para os dois.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, storage, translators
+from . import config, sources, storage, translators
 from .formats import merge_into_sentences
-from .youtube import Snippet, TranscriptError, fetch_transcript
+from .transcript import Snippet, TranscriptError
 
 
 class PipelineError(Exception):
@@ -30,6 +32,9 @@ class Resultado:
     snippets: list[Snippet]
     originais: list[str]
     traducoes: list[str] | None
+    source: str = "youtube"
+    source_url: str | None = None
+    method: str = "legenda"
     saved_to: Path | None = None
     _final: list[str] = field(default_factory=list)
 
@@ -58,9 +63,8 @@ def processar(
         if progresso:
             progresso(mensagem)
 
-    aviso("Buscando a legenda no YouTube...")
     try:
-        transcript = fetch_transcript(url)
+        transcript = sources.fetch_transcript(url, progresso=progresso)
     except TranscriptError as exc:
         raise PipelineError(str(exc)) from exc
 
@@ -68,7 +72,8 @@ def processar(
         merge_into_sentences(transcript.snippets) if merge_sentences else transcript.snippets
     )
     originais = [s.text for s in snippets]
-    aviso(f"Legenda em {transcript.language}: {len(snippets)} frases.")
+    origem = "ditada do audio" if transcript.method == "audio" else "legenda"
+    aviso(f"Texto em {transcript.language} ({origem}): {len(snippets)} frases.")
 
     traducoes: list[str] | None = None
     note: str | None = None
@@ -76,8 +81,8 @@ def processar(
 
     if translate:
         target = (target_lang or config.DEFAULT_TARGET_LANG).upper()
-        origem = transcript.language_code.split("-")[0].lower()
-        if origem == target.split("-")[0].lower():
+        idioma = transcript.language_code.split("-")[0].lower()
+        if idioma and idioma == target.split("-")[0].lower():
             note = f"O video ja esta em {transcript.language}; nao foi traduzido."
             aviso(note)
         else:
@@ -101,6 +106,9 @@ def processar(
         snippets=snippets,
         originais=originais,
         traducoes=traducoes,
+        source=transcript.source,
+        source_url=transcript.source_url,
+        method=transcript.method,
     )
 
     if save:
@@ -114,6 +122,9 @@ def processar(
                 source_language_code=resultado.source_language_code,
                 target_lang=target,
                 translated=resultado.translated,
+                source=resultado.source,
+                source_url=resultado.source_url,
+                method=resultado.method,
                 destino=output_dir,
             )
         except OSError as exc:
