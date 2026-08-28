@@ -233,7 +233,7 @@ O que o `instalar.py` faz:
 
 | | |
 |---|---|
-| `%LOCALAPPDATA%\Programs\legextrac\legextrac.exe` | o app, ~30 MB, sem depender do projeto |
+| `%LOCALAPPDATA%\Programs\legextrac\legextrac.exe` | o app, ~25 MB, sem depender do projeto |
 | `%APPDATA%\legextrac\.env` | a chave da API, fora do executável |
 | Menu Iniciar `legextrac.lnk` | o atalho, com ícone |
 
