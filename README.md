@@ -1,16 +1,21 @@
 # legextrac
 
-API em Python que recebe um link do YouTube, extrai a legenda/transcrição do vídeo e traduz para
-português usando o DeepL.
+API em Python que recebe o link de qualquer publicação com vídeo ou áudio — YouTube, Instagram,
+TikTok, X, Facebook, Vimeo, Reddit e as centenas de sites que o `yt-dlp` conhece — extrai a fala no
+idioma original e traduz para português.
 
 ## Como funciona
 
-1. `POST /transcript` recebe a URL do vídeo.
-2. `youtube-transcript-api` busca **sempre a legenda original**, no idioma falado no vídeo.
+1. `POST /transcript` recebe a URL.
+2. O texto vem por um de dois caminhos, nessa ordem de preferência:
+   - **Legenda publicada** (só o YouTube): `youtube-transcript-api` busca **sempre a legenda
+     original**, no idioma falado no vídeo. É de graça, instantânea e com os tempos exatos.
+   - **Áudio ditado pelo Gemini** (todo o resto): o `yt-dlp` baixa a mídia e o mesmo modelo que já
+     traduz transcreve a fala. Vale também para vídeo do YouTube sem legenda.
 3. As linhas são agrupadas em frases — legendas quebram frases no meio, e traduzir fragmentos
    isolados piora bastante o resultado.
 4. As frases vão em lotes para o tradutor — **Gemini** por padrão, DeepL como alternativa.
-5. Grava um `.txt` com a tradução na pasta `output/` (configurável em `OUTPUT_DIR`).
+5. Grava um `.txt` com a tradução na pasta **Downloads** (configurável em `OUTPUT_DIR`).
 6. Retorna JSON com segmentos + tempos, texto corrido, ou um arquivo `.srt` já traduzido.
 
 ## Arquivo gerado
@@ -30,6 +35,7 @@ Uma frase por linha, com cabeçalho de contexto:
 ```
 Titulo: But what is a neural network?
 Link: https://www.youtube.com/watch?v=aircAruvnKk
+Fonte: YouTube (legenda publicada no site)
 Idioma original: English (en)
 Traduzido para: PT-BR
 Gerado em: 11/08/2026 09:28
@@ -41,8 +47,10 @@ Está escrito de forma desleixada, mas seu cérebro lê sem dificuldade.
 
 Detalhes:
 
-- O título vem do oEmbed público do YouTube. Se essa chamada falhar, o arquivo fica só com o ID —
-  não é motivo para a requisição inteira falhar.
+- A linha `Fonte:` diz de qual plataforma veio e se o texto é legenda publicada ou ditada do
+  áudio — o que muda o que dá para esperar da precisão dos tempos.
+- O título vem do oEmbed público do YouTube (ou dos metadados do `yt-dlp`, nos outros sites). Se
+  essa chamada falhar, o arquivo fica só com o ID — não é motivo para a requisição inteira falhar.
 - Caracteres proibidos pelo Windows (`\ / : * ? " < > |`) são removidos, e nomes reservados
   (`CON`, `NUL`, `COM1`…) ganham prefixo, senão o Windows recusa criar o arquivo.
 - Gravado em UTF-8 com BOM, para não sair com acento quebrado no Bloco de Notas.
@@ -64,6 +72,64 @@ Um vídeo popular pode ter dezenas de legendas traduzidas pela comunidade — o 
 
 Se o vídeo já for falado em português, o tradutor não é chamado e a resposta traz um aviso no
 campo `note` — não faz sentido gastar cota traduzindo pt→pt.
+
+## Instagram, TikTok e outros sites
+
+Fora do YouTube praticamente ninguém publica faixa de legenda — só existe o vídeo. Para esses
+links o caminho é outro: o `yt-dlp` baixa a mídia e o **Gemini transcreve o áudio**.
+
+Reaproveita a `GEMINI_API_KEY` que já está no `.env` (mesmo com `TRANSLATOR=deepl`), então não
+entra chave nova nem modelo local pesado. O que muda em relação ao YouTube:
+
+| | Legenda publicada (YouTube) | Áudio ditado (resto) |
+|---|---|---|
+| Custo | zero | cota do Gemini |
+| Tempo | instantâneo | download + ~10–60 s de transcrição |
+| Tempos do `.srt` | exatos | aproximados, ditados pelo modelo |
+| Precisão | a que o autor publicou | boa, mas o modelo pode errar nome próprio |
+
+### ffmpeg (recomendado)
+
+Com o `ffmpeg` no PATH, só a trilha de **áudio** é baixada e convertida para MP3: arquivo pequeno e
+cobrança de tokens ~8x menor. Sem ele, o programa baixa o MP4 inteiro e manda vídeo junto — o que
+funciona, mas fica limitado a uns 12 minutos por vídeo.
+
+```bash
+winget install Gyan.FFmpeg
+```
+
+O `/health` da API mostra se ele foi encontrado. Com `ffmpeg` o teto passa a ser o
+`MEDIA_MAX_MINUTES` (padrão 30 min).
+
+### Conteúdo que exige login
+
+Instagram e TikTok escondem boa parte das publicações atrás de login, e aí o download falha com
+uma mensagem pedindo cookies. A saída é reaproveitar a sessão já aberta no seu navegador:
+
+```
+COOKIES_FROM_BROWSER=chrome
+```
+
+Aceita `chrome`, `edge`, `firefox`, `brave`, `opera`, `vivaldi`, `safari` e o formato
+`chrome:Profile 2` para escolher o perfil. Como alternativa, exporte um `cookies.txt` no formato
+Netscape e aponte `COOKIES_FILE` para ele — esse tem prioridade.
+
+Feche o navegador antes de rodar: com o Chrome aberto o arquivo de cookies fica travado no Windows.
+
+### YouTube sem legenda
+
+Vídeo do YouTube que não tem legenda nenhuma — ou cujo IP levou 429 no endpoint de legendas —
+também cai no caminho do áudio, em vez de simplesmente falhar. Para preferir o erro e não gastar
+cota, `AUDIO_FALLBACK=0` no `.env`.
+
+### Site novo, extrator quebrado
+
+Quando um site muda, o extrator correspondente para de funcionar até o `yt-dlp` ser atualizado.
+É a manutenção normal dessa biblioteca:
+
+```bash
+pip install -U yt-dlp
+```
 
 ## Tradutores
 
@@ -124,6 +190,13 @@ pip install -r requirements.txt
 Copie `.env.example` para `.env` e preencha `GEMINI_API_KEY` (chave gratuita, sem cartão, em
 https://aistudio.google.com/apikey).
 
+Para links fora do YouTube, instale também o `ffmpeg` — opcional, mas deixa a transcrição muito
+mais barata e permite vídeos longos:
+
+```bash
+winget install Gyan.FFmpeg
+```
+
 ### Onde guardar a chave
 
 O `.env` está no `.gitignore`, então **não vai para o repositório** — é o padrão da indústria, e o
@@ -160,7 +233,7 @@ O que o `instalar.py` faz:
 
 | | |
 |---|---|
-| `%LOCALAPPDATA%\Programs\legextrac\legextrac.exe` | o app, ~15 MB, sem depender do projeto |
+| `%LOCALAPPDATA%\Programs\legextrac\legextrac.exe` | o app, ~30 MB, sem depender do projeto |
 | `%APPDATA%\legextrac\.env` | a chave da API, fora do executável |
 | Menu Iniciar `legextrac.lnk` | o atalho, com ícone |
 
@@ -173,12 +246,13 @@ pode ser copiado para outra máquina sem levar segredo junto — lá, basta cria
 pasta de configuração. A busca é em ordem: pasta atual, pasta do executável, `%APPDATA%\legextrac`.
 Variável de ambiente do sistema tem prioridade sobre todas.
 
-A janela tem um campo para o link e o botão **TRANSCREVER**. Ao terminar, o arquivo é salvo na
-pasta **Downloads** e o Explorer abre com ele já selecionado.
+A janela tem um campo para o link e o botão **TRANSCREVER**. Aceita link de qualquer site
+suportado. Ao terminar, o arquivo é salvo na pasta **Downloads** e o Explorer abre com ele já
+selecionado.
 
 Detalhes:
 
-- Se você copiou o link antes de abrir o app, o campo já vem preenchido.
+- Se você copiou qualquer link antes de abrir o app, o campo já vem preenchido.
 - `Enter` transcreve, `Esc` fecha.
 - O trabalho roda em outra thread, então a janela não congela durante a tradução.
 - Roda com `pythonw.exe`, sem janela preta de console atrás.
@@ -235,22 +309,34 @@ Arquivo de legenda traduzido:
 curl "http://127.0.0.1:8000/transcript?url=https://youtu.be/dQw4w9WgXcQ&format=srt" -o legenda-pt.srt
 ```
 
+Um reel do Instagram (mesma chamada; o caminho do áudio é escolhido sozinho):
+
+```bash
+curl -X POST http://127.0.0.1:8000/transcript -H "Content-Type: application/json" -d "{\"url\":\"https://www.instagram.com/reel/CxxxxxxxxxX/\"}"
+```
+
 ### Parâmetros
 
 | Campo | Padrão | Descrição |
 |---|---|---|
-| `url` | — | Link `watch`, `youtu.be`, `shorts`, `embed`, `live` ou o ID de 11 caracteres |
+| `url` | — | Link de qualquer site com mídia (YouTube, Instagram, TikTok, X…) ou o ID de 11 caracteres do YouTube |
 | `target_lang` | `PT-BR` | Idioma de destino no formato DeepL (`PT-BR`, `PT-PT`, `EN-US`, …) |
 | `translate` | `true` | `false` retorna só a legenda original, sem gastar cota do DeepL |
 | `merge_sentences` | `true` | Agrupa linhas em frases antes de traduzir |
 | `save` | `true` | Grava o `.txt` em `OUTPUT_DIR` |
 | `format` | `json` | `json`, `text` ou `srt` |
 
+Além dos segmentos, a resposta JSON traz `source` (plataforma), `source_url` (link canônico) e
+`method` — `legenda` quando veio de faixa publicada, `audio` quando foi ditada pelo Gemini.
+
 ### Respostas de erro
 
-- `422` — link inválido, vídeo sem legenda, legendas desativadas, vídeo privado, restrição de
-  idade, ou **IP bloqueado pelo YouTube**.
-- `502` — falha no tradutor (chave inválida, cota esgotada, rate limit).
+- `422` — link inválido, site sem extrator, publicação privada ou apagada, conteúdo que exige
+  login (configure `COOKIES_FROM_BROWSER`), vídeo mais longo que `MEDIA_MAX_MINUTES`, ou vídeo sem
+  nenhuma fala.
+- `502` — falha no tradutor ou na transcrição (chave inválida, cota esgotada, rate limit).
+
+A mensagem em `detail` já diz o que fazer em cada caso.
 
 ### Erro 429 / "limitando as requisições deste IP"
 
@@ -266,17 +352,26 @@ python -m app.diagnostico https://www.youtube.com/watch?v=SEU_VIDEO
 
 Ele testa em separado a página do vídeo, a existência de legendas e o download do texto, e diz
 qual das três falhou. Se for o 429: esperar algumas horas, trocar de rede (dados móveis costumam
-ter outro IP), ou configurar `YT_PROXY_HTTP` no `.env`. Trocar de biblioteca não resolve — o
-`yt-dlp` bate no mesmo endpoint e toma o mesmo 429.
+ter outro IP), ou configurar `YT_PROXY_HTTP` no `.env`.
+
+Na prática o 429 deixou de ser um beco sem saída: o limite é só do endpoint que serve o **texto**
+da legenda, e o download da mídia sai por outro caminho. Então o programa cai sozinho na
+transcrição por áudio e entrega o texto do mesmo jeito — mais devagar e gastando cota do Gemini,
+mas entrega. Para preferir o erro, `AUDIO_FALLBACK=0`.
 
 ## Observações
 
 - **Custo:** um vídeo de 1h costuma ter 40–60 mil caracteres. Use `translate=false` para conferir
-  a legenda antes de gastar cota.
+  a legenda antes de gastar cota. Transcrição por áudio custa bem mais que tradução de texto:
+  ~32 tokens por segundo de áudio (e ~8x isso se faltar o `ffmpeg`, porque aí vai vídeo junto).
 - **Privacidade:** no plano gratuito do Gemini, o Google pode usar o conteúdo enviado para
   melhorar os modelos. Se a legenda for sensível, use o DeepL ou um plano pago.
 - **Bloqueio de IP:** o YouTube bloqueia IPs de datacenter. Rodando local funciona normalmente;
   se você subir isso numa VPS/nuvem e receber erros de "não foi possível obter a legenda",
   configure `YT_PROXY_HTTP`/`YT_PROXY_HTTPS` no `.env` com um proxy residencial.
-- Vídeos sem legenda alguma (nem automática) não têm como ser processados por aqui — precisaria
-  baixar o áudio e transcrever com Whisper, que é outro caminho.
+- **Tempos aproximados:** no caminho do áudio quem marca o início e o fim de cada fala é o
+  modelo, não o site. Serve bem para ler e traduzir; para legendar um vídeo com sincronismo
+  perfeito, prefira um link que tenha legenda publicada.
+- **Vídeo sem fala** (só música ou imagem) falha com mensagem própria — não há o que transcrever.
+- **Extratores envelhecem:** site muda, `yt-dlp` quebra. Se um link parar de funcionar do nada,
+  `pip install -U yt-dlp` costuma resolver antes de qualquer outra investigação.

@@ -40,6 +40,13 @@ def _clean(name: str, default: str = "") -> str:
     return "" if value.startswith("sua-chave") else value
 
 
+def _flag(name: str, default: bool) -> bool:
+    valor = os.getenv(name, "").strip().lower()
+    if not valor:
+        return default
+    return valor not in ("0", "false", "nao", "no", "off")
+
+
 # Provedor de traducao: "gemini" ou "deepl".
 TRANSLATOR = os.getenv("TRANSLATOR", "gemini").strip().lower()
 
@@ -55,6 +62,13 @@ GEMINI_RPM = int(os.getenv("GEMINI_RPM", "10"))
 # perder o alinhamento e forcar reenvio dividido.
 GEMINI_MAX_ITEMS_PER_REQUEST = int(os.getenv("GEMINI_MAX_ITEMS_PER_REQUEST", "60"))
 GEMINI_MAX_CHARS_PER_REQUEST = int(os.getenv("GEMINI_MAX_CHARS_PER_REQUEST", "6000"))
+
+# Modelo usado para DITAR o audio (Instagram, TikTok, YouTube sem legenda).
+# Vazio = o mesmo GEMINI_MODEL da traducao.
+GEMINI_TRANSCRIBE_MODEL = os.getenv("GEMINI_TRANSCRIBE_MODEL", "").strip()
+# Teto da resposta. Transcricao de video longo e um texto grande: apertado
+# demais, o modelo corta a legenda no meio.
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "65536"))
 
 # --- DeepL ----------------------------------------------------------------
 DEEPL_API_KEY = _clean("DEEPL_API_KEY")
@@ -79,3 +93,21 @@ YT_PROXY_HTTPS = os.getenv("YT_PROXY_HTTPS", "").strip() or None
 # Limites do DeepL por requisicao: 50 textos e ~128 KiB de corpo.
 DEEPL_MAX_TEXTS_PER_REQUEST = 50
 DEEPL_MAX_CHARS_PER_REQUEST = 100_000
+
+# --- Midia (Instagram, TikTok, X, Facebook...) -----------------------------
+# Sites que nao publicam legenda passam por download + transcricao do audio.
+
+# Quando o video do YouTube nao tem legenda (ou o IP esta limitado), tenta
+# pelo audio em vez de falhar. Custa cota do Gemini, por isso da para desligar.
+AUDIO_FALLBACK = _flag("AUDIO_FALLBACK", True)
+
+# Teto de duracao para transcricao por audio. Video longo vira texto longo, e
+# texto longo custa cota -- suba so ate onde o seu plano do Gemini aguentar.
+MEDIA_MAX_MINUTES = int(os.getenv("MEDIA_MAX_MINUTES", "30"))
+
+# Instagram e TikTok escondem boa parte do conteudo atras de login.
+# Reaproveita a sessao ja aberta no navegador: chrome, edge, firefox, brave...
+# Aceita "chrome:Profile 2" para escolher o perfil.
+COOKIES_FROM_BROWSER = os.getenv("COOKIES_FROM_BROWSER", "").strip()
+# Alternativa: arquivo cookies.txt no formato Netscape. Tem prioridade.
+COOKIES_FILE = os.getenv("COOKIES_FILE", "").strip()

@@ -27,6 +27,9 @@ COMANDO = [
     # O PyInstaller nao enxerga imports feitos de forma indireta.
     "--hidden-import=youtube_transcript_api",
     "--hidden-import=defusedxml.ElementTree",
+    # O yt-dlp carrega os extratores por nome, em tempo de execucao: sem
+    # collect-all o exe sai sem nenhum site suportado.
+    "--collect-all=yt_dlp",
     # A API web nao faz parte do app; fora dela o exe fica bem menor.
     "--exclude-module=fastapi",
     "--exclude-module=uvicorn",

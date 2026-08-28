@@ -1,6 +1,6 @@
 """Agrupamento de segmentos e geracao de SRT."""
 
-from .youtube import Snippet
+from .transcript import Snippet
 
 _SENTENCE_END = (".", "!", "?", "...", "…", ":")
 _MAX_GROUP_CHARS = 500

@@ -1,7 +1,12 @@
-"""Extracao de legendas/transcricao de videos do YouTube."""
+"""Extracao da legenda publicada de videos do YouTube.
+
+Este e o caminho preferido quando o link e do YouTube: a legenda ja existe
+pronta no servidor, entao sai de graca, na hora e com os tempos exatos. Sites
+que nao publicam legenda (Instagram, TikTok...) passam pelo caminho do audio,
+em `speech.py`.
+"""
 
 import re
-from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -26,30 +31,39 @@ except ImportError:  # pragma: no cover
     )
 
 from . import config
+from .transcript import Snippet, Transcript, TranscriptError
 
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _PATH_PREFIXES = ("/embed/", "/shorts/", "/v/", "/live/")
 
 
-class TranscriptError(Exception):
-    """Falha esperada ao obter a legenda (mensagem exibivel ao usuario)."""
+class SemLegenda(TranscriptError):
+    """O video existe, mas nao da para pegar a legenda pronta dele.
+
+    Separado do erro generico porque so este caso vale a pena tentar de novo
+    ditando o audio: video sem legenda, legenda desativada ou IP limitado.
+    """
 
 
-@dataclass
-class Snippet:
-    text: str
-    start: float
-    duration: float
+def _host(url: str) -> str:
+    if "://" not in url:
+        url = "https://" + url
+    return urlparse(url).netloc.lower().removeprefix("www.").removeprefix("m.")
 
 
-@dataclass
-class Transcript:
-    video_id: str
-    language: str
-    language_code: str
-    is_generated: bool
-    snippets: list[Snippet]
-    title: str | None = None
+def is_youtube(url: str) -> bool:
+    """Diz se o link vai pelo caminho da legenda pronta, sem levantar erro."""
+    url = (url or "").strip()
+    if not url:
+        return False
+    if _VIDEO_ID_RE.match(url):
+        return True
+    host = _host(url)
+    return (
+        host in ("youtu.be", "youtube.com")
+        or host.endswith(".youtube.com")
+        or host.endswith("youtube-nocookie.com")
+    )
 
 
 def extract_video_id(url: str) -> str:
@@ -64,9 +78,9 @@ def extract_video_id(url: str) -> str:
         url = "https://" + url
 
     parsed = urlparse(url)
-    host = parsed.netloc.lower().removeprefix("www.").removeprefix("m.")
+    host = _host(url)
 
-    if host in ("youtu.be", "www.youtu.be"):
+    if host == "youtu.be":
         candidate = parsed.path.lstrip("/").split("/")[0]
     elif host.endswith("youtube.com") or host.endswith("youtube-nocookie.com"):
         candidate = ""
@@ -128,7 +142,7 @@ def _pick(transcript_list):
     """
     available = list(transcript_list)
     if not available:
-        raise TranscriptError("Este video nao possui legendas disponiveis.")
+        raise SemLegenda("Este video nao possui legendas disponiveis.")
 
     manual = [t for t in available if not t.is_generated]
     generated = [t for t in available if t.is_generated]
@@ -178,17 +192,17 @@ def fetch_title(video_id: str) -> str | None:
     return None
 
 
-def fetch_transcript(url: str) -> Transcript:
-    """Busca a legenda do video no idioma original em que ele foi falado."""
+def fetch_captions(url: str) -> Transcript:
+    """Busca a legenda publicada do video, no idioma original em que foi falado."""
     video_id = extract_video_id(url)
     try:
         transcript_list = _list_transcripts(video_id)
         chosen = _pick(transcript_list)
         snippets = _to_snippets(chosen.fetch())
     except TranscriptsDisabled as exc:
-        raise TranscriptError("As legendas estao desativadas neste video.") from exc
+        raise SemLegenda("As legendas estao desativadas neste video.") from exc
     except NoTranscriptFound as exc:
-        raise TranscriptError("Nenhuma legenda encontrada para este video.") from exc
+        raise SemLegenda("Nenhuma legenda encontrada para este video.") from exc
     except VideoUnavailable as exc:
         raise TranscriptError("Video indisponivel ou privado.") from exc
     except AgeRestricted as exc:
@@ -197,17 +211,17 @@ def fetch_transcript(url: str) -> Transcript:
         # O YouTube limita por IP o endpoint que serve o TEXTO da legenda. O
         # resto do site continua respondendo normalmente, entao nao adianta
         # testar abrindo o video no navegador: parece tudo certo.
-        raise TranscriptError(
+        raise SemLegenda(
             "O YouTube esta limitando as requisicoes de legenda deste IP (HTTP 429). "
             "Nao e a chave nem o video. Opcoes: esperar algumas horas, usar outra rede "
             "(dados moveis, por exemplo), ou configurar YT_PROXY_HTTP no .env. "
-            "Rode 'python -m app.diagnostico URL' para confirmar."
+            "Rode python -m app.diagnostico URL para confirmar."
         ) from exc
     except CouldNotRetrieveTranscript as exc:
-        raise TranscriptError(f"Nao foi possivel obter a legenda: {exc}") from exc
+        raise SemLegenda(f"Nao foi possivel obter a legenda: {exc}") from exc
 
     if not snippets:
-        raise TranscriptError("A legenda veio vazia.")
+        raise SemLegenda("A legenda veio vazia.")
 
     return Transcript(
         video_id=video_id,
@@ -216,4 +230,7 @@ def fetch_transcript(url: str) -> Transcript:
         is_generated=bool(getattr(chosen, "is_generated", False)),
         snippets=snippets,
         title=fetch_title(video_id),
+        source="youtube",
+        source_url=f"https://www.youtube.com/watch?v={video_id}",
+        method="legenda",
     )

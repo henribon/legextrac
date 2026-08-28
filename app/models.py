@@ -8,8 +8,15 @@ from pydantic import BaseModel, Field
 class TranscriptRequest(BaseModel):
     url: str = Field(
         ...,
-        description="Link do video no YouTube (watch, youtu.be, shorts, embed) ou o ID",
-        examples=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+        description=(
+            "Link de qualquer publicacao com video ou audio: YouTube, Instagram, TikTok, "
+            "X, Facebook, Vimeo, Reddit... ou o ID de 11 caracteres do YouTube"
+        ),
+        examples=[
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.instagram.com/reel/CxxxxxxxxxX/",
+            "https://www.tiktok.com/@usuario/video/7300000000000000000",
+        ],
     )
     target_lang: str | None = Field(
         default=None,
@@ -48,6 +55,15 @@ class TranscriptResponse(BaseModel):
     video_id: str
     title: str | None = None
     saved_to: str | None = None
+    source: str = Field(default="youtube", description="Plataforma de onde veio a midia")
+    source_url: str | None = Field(default=None, description="Link canonico da publicacao")
+    method: str = Field(
+        default="legenda",
+        description=(
+            "Como o texto foi obtido: 'legenda' (faixa publicada, tempos exatos) "
+            "ou 'audio' (ditado pelo Gemini, tempos aproximados)"
+        ),
+    )
     source_language: str
     source_language_code: str
     is_generated: bool

@@ -67,8 +67,11 @@ _rate_lock = threading.Lock()
 _last_call = 0.0
 
 
-def _throttle() -> None:
+def throttle() -> None:
     """Espaca as chamadas para respeitar o limite de requisicoes por minuto.
+
+    Publica porque a transcricao de audio (speech.py) bate no mesmo endpoint
+    com a mesma chave: os dois precisam dividir o mesmo contador.
 
     O plano gratuito do Gemini limita por requisicao, nao por caractere, entao
     estourar o RPM e o unico jeito realista de tomar 429 aqui.
@@ -130,7 +133,7 @@ def _call(client: httpx.Client, prompt: str) -> str:
 
     last_error = ""
     for attempt in range(3):
-        _throttle()
+        throttle()
         try:
             response = client.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:

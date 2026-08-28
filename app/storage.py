@@ -18,6 +18,25 @@ _RESERVED = {
 
 _MAX_STEM = 120
 
+# Nome bonito da plataforma para o cabecalho. A chave e o extractor_key do
+# yt-dlp em minusculas; o que nao estiver aqui sai como veio.
+_FONTES = {
+    "youtube": "YouTube",
+    "instagram": "Instagram",
+    "tiktok": "TikTok",
+    "twitter": "X (Twitter)",
+    "facebook": "Facebook",
+    "vimeo": "Vimeo",
+    "reddit": "Reddit",
+    "twitch": "Twitch",
+    "soundcloud": "SoundCloud",
+    "generic": "site sem extrator proprio",
+}
+
+
+def _nome_fonte(source: str) -> str:
+    return _FONTES.get(source, source.capitalize()) if source else "desconhecida"
+
 
 def sanitize(name: str) -> str:
     """Transforma um titulo de video em nome de arquivo valido no Windows."""
@@ -73,6 +92,9 @@ def save_txt(
     source_language_code: str,
     target_lang: str | None,
     translated: bool,
+    source: str = "youtube",
+    source_url: str | None = None,
+    method: str = "legenda",
     destino: Path | None = None,
 ) -> Path:
     """Grava uma frase por linha e devolve o caminho do arquivo.
@@ -82,9 +104,13 @@ def save_txt(
     stem = sanitize(f"{title} [{video_id}]" if title else video_id)
     destino = output_dir(destino) / f"{stem}.txt"
 
+    procedencia = (
+        "transcrito do audio" if method == "audio" else "legenda publicada no site"
+    )
     cabecalho = [
         f"Titulo: {title}" if title else f"Video: {video_id}",
-        f"Link: https://www.youtube.com/watch?v={video_id}",
+        f"Link: {source_url or video_id}",
+        f"Fonte: {_nome_fonte(source)} ({procedencia})",
         f"Idioma original: {source_language} ({source_language_code})",
         f"Traduzido para: {target_lang}" if translated else "Sem traducao (texto original)",
         f"Gerado em: {datetime.now():%d/%m/%Y %H:%M}",
